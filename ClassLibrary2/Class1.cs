@@ -9,7 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autodesk.Revit.ApplicationServices;
-
+// Le projet loi numero quatre-vingt-seize
 namespace ClassLibrary2
 {
     [Transaction(TransactionMode.Manual)]
@@ -300,6 +300,5 @@ namespace ClassLibrary2
     }
 }
 
-// blah blah blah test peepoopeepoo
 
 
