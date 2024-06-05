@@ -9,7 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autodesk.Revit.ApplicationServices;
-// Le projet loi numero quatre-vingt-seize
+
 namespace ClassLibrary2
 {
     [Transaction(TransactionMode.Manual)]
@@ -85,20 +85,6 @@ namespace ClassLibrary2
         private void HandleFileOpeningError(string filePath, StreamWriter writer)
         {
             writer.WriteLine($"{DateTime.Now}: Failed to open Revit file: {filePath}");
-        }
-
-        private void SaveDocument(Document doc, StreamWriter writer)
-        {
-            try
-            {
-                doc.Save();
-                writer.WriteLine($"{DateTime.Now}: Document saved successfully.");
-            }
-            catch (Exception ex)
-            {
-                writer.WriteLine($"{DateTime.Now}: An error occurred while saving the document: {ex.Message}");
-                writer.WriteLine(ex.StackTrace);
-            }
         }
 
         private void CheckPanelCircuitMismatch(Document doc, StreamWriter writer)
@@ -237,6 +223,9 @@ namespace ClassLibrary2
                     using (Transaction trans = new Transaction(doc))
                     {
                         trans.Start();
+                        var failureHandlingOptions = trans.GetFailureHandlingOptions();
+                        failureHandlingOptions.SetFailuresPreprocessor(new SimpleFailurePreprocessor());
+                        trans.SetFailureHandlingOptions(failureHandlingOptions);
                         action.Invoke();
                         trans.Commit();
                     }
@@ -252,6 +241,25 @@ namespace ClassLibrary2
                     }
                 }
                 transGroup.Assimilate();
+            }
+        }
+
+        private void SaveDocument(Document doc, StreamWriter writer)
+        {
+            try
+            {
+                using (Transaction trans = new Transaction(doc, "Save Document"))
+                {
+                    trans.Start();
+                    doc.Save();
+                    trans.Commit();
+                }
+                writer.WriteLine($"{DateTime.Now}: Document saved successfully.");
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"{DateTime.Now}: An error occurred while saving the document: {ex.Message}");
+                writer.WriteLine(ex.StackTrace);
             }
         }
 
@@ -299,6 +307,4 @@ namespace ClassLibrary2
         }
     }
 }
-
-
 
