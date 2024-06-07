@@ -10,7 +10,7 @@ using System.IO;
 using System.Linq;
 using Autodesk.Revit.ApplicationServices;
 using Autodesk.Revit.DB.Events;
-
+// kore wa pen desu
 namespace ClassLibrary2
 {
     [Autodesk.Revit.Attributes.Transaction(Autodesk.Revit.Attributes.TransactionMode.Manual)]
