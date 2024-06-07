@@ -9,10 +9,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autodesk.Revit.ApplicationServices;
+using Autodesk.Revit.DB.Events;
 
 namespace ClassLibrary2
 {
-    [Transaction(TransactionMode.Manual)]
+    [Autodesk.Revit.Attributes.Transaction(Autodesk.Revit.Attributes.TransactionMode.Manual)]
     public class Class1 : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
@@ -29,6 +30,9 @@ namespace ClassLibrary2
                 {
                     string[] files = Directory.GetFiles(folderPath, "*.rvt");
 
+                    // Set up failure message handler
+                    app.FailuresProcessing += OnFailuresProcessing;
+
                     foreach (string filePath in files)
                     {
                         Document doc = null;
@@ -43,13 +47,11 @@ namespace ClassLibrary2
                             {
                                 writer.WriteLine($"{DateTime.Now}: Successfully opened Revit file: {filePath}");
 
-                                SuppressErrorsAndWarnings(doc, () =>
-                                {
-                                    DisconnectAllElements(doc, writer);
-                                    CheckPanelCircuitMismatch(doc, writer);
-                                    SaveDocument(doc, writer);
-                                    ExportToIFC(doc, filePath, writer);
-                                });
+                                // Perform operations on the document
+                                DisconnectAllElements(doc, writer);
+                                CheckPanelCircuitMismatch(doc, writer);
+                                SaveDocument(doc, writer);
+                                ExportToIFC(doc, filePath, writer);
                             }
                             else
                             {
@@ -69,13 +71,16 @@ namespace ClassLibrary2
                             }
                         }
                     }
+
+                    // Remove failure message handler
+                    app.FailuresProcessing -= OnFailuresProcessing;
                 }
             }
             catch (Exception ex)
             {
-                using (StreamWriter writer = new StreamWriter(logFilePath, true))
+                using (StreamWriter writer2 = new StreamWriter(logFilePath, true))
                 {
-                    writer.WriteLine($"{DateTime.Now}: An error occurred: {ex.Message}");
+                    writer2.WriteLine($"{DateTime.Now}: An error occurred: {ex.Message}");
                 }
             }
 
@@ -110,18 +115,10 @@ namespace ClassLibrary2
 
         private void DisconnectAllElements(Document doc, StreamWriter writer)
         {
-            try
-            {
-                DisconnectElectricalEquipment(doc, writer);
-                DisconnectPipes(doc, writer);
-                DisconnectDucts(doc, writer);
-                DisconnectCircuits(doc, writer);
-            }
-            catch (Exception ex)
-            {
-                writer.WriteLine($"{DateTime.Now}: An error occurred during disconnection: {ex.Message}");
-                writer.WriteLine(ex.StackTrace);
-            }
+            DisconnectElectricalEquipment(doc, writer);
+            DisconnectPipes(doc, writer);
+            DisconnectDucts(doc, writer);
+            DisconnectCircuits(doc, writer);
         }
 
         private void DisconnectElectricalEquipment(Document doc, StreamWriter writer)
@@ -135,7 +132,11 @@ namespace ClassLibrary2
 
             foreach (var element in electricalElements)
             {
-                DisconnectConnectors(element.MEPModel.ConnectorManager, doc, writer, "Disconnect Electrical Equipment");
+                FamilyInstance familyInstance = element as FamilyInstance;
+                if (familyInstance != null)
+                {
+                    DisconnectConnectors(familyInstance.MEPModel.ConnectorManager, doc, writer, "Disconnect Electrical Equipment");
+                }
             }
         }
 
@@ -161,7 +162,8 @@ namespace ClassLibrary2
 
             foreach (var duct in ducts)
             {
-                DisconnectConnectors(((Duct)duct).ConnectorManager, doc, writer, "Disconnect Duct");
+                DisconnectConnectors(((Duct)
+                    duct).ConnectorManager, doc, writer, "Disconnect Duct");
             }
         }
 
@@ -210,37 +212,6 @@ namespace ClassLibrary2
                 }
 
                 trans.Commit();
-            }
-        }
-
-        private void SuppressErrorsAndWarnings(Document doc, Action action)
-        {
-            using (TransactionGroup transGroup = new TransactionGroup(doc, "Suppress Errors and Warnings"))
-            {
-                transGroup.Start();
-                try
-                {
-                    using (Transaction trans = new Transaction(doc))
-                    {
-                        trans.Start();
-                        var failureHandlingOptions = trans.GetFailureHandlingOptions();
-                        failureHandlingOptions.SetFailuresPreprocessor(new SimpleFailurePreprocessor());
-                        trans.SetFailureHandlingOptions(failureHandlingOptions);
-                        action.Invoke();
-                        trans.Commit();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Log the error to a file
-                    string logFilePath = "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\Dynamo_Revit_Log.txt";
-                    using (StreamWriter writer = new StreamWriter(logFilePath, true))
-                    {
-                        writer.WriteLine($"{DateTime.Now}: An error occurred: {ex.Message}");
-                        writer.WriteLine(ex.StackTrace);
-                    }
-                }
-                transGroup.Assimilate();
             }
         }
 
@@ -294,17 +265,16 @@ namespace ClassLibrary2
             }
         }
 
-        private class SimpleFailurePreprocessor : IFailuresPreprocessor
+        // Failure processing handler to suppress errors and warnings
+        private void OnFailuresProcessing(object sender, FailuresProcessingEventArgs e)
         {
-            public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor)
+            var failList = e.GetFailuresAccessor().GetFailureMessages();
+            foreach (var failureMessageAccessor in failList)
             {
-                foreach (FailureMessageAccessor fma in failuresAccessor.GetFailureMessages())
-                {
-                    failuresAccessor.DeleteWarning(fma);
-                }
-                return FailureProcessingResult.Continue;
+                // Dismiss all types of warnings and failures
+                e.GetFailuresAccessor().DeleteWarning(failureMessageAccessor);
             }
+            e.SetProcessingResult(FailureProcessingResult.Continue);
         }
     }
 }
-
