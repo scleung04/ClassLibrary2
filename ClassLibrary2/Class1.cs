@@ -285,26 +285,36 @@ namespace ClassLibrary2
                 // Additional IFC export options
                 ifcOptions.AddOption("SplitWallsAndColumnsByLevel", "true");
 
-                // Tab 2
+                // Tab 3
                 ifcOptions.AddOption("ExportRevitPropertySets", "true");
                 ifcOptions.AddOption("ExportIFCCommonPropertySets", "true");
                 ifcOptions.AddOption("ExportBaseQuantities", "true");
-
+                ifcOptions.AddOption("ExportMaterialPropertySets", "true"); // Export material property sets
                 ifcOptions.AddOption("ExportSchedulesAsPsets", "true");
-
+                ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "true"); // Export only schedules containing IFC, Pset, or Common in the title
                 ifcOptions.AddOption("ExportUserDefinedPsets", "true");
                 ifcOptions.AddOption("ExportUserDefinedPsetsFile", "path_to_user_defined_psets_file.json");
-
+                ifcOptions.AddOption("ExportParameterMappingTable", "true"); // Export parameter mapping table
                 ifcOptions.AddOption("ExportUserDefinedParameterMappingFile", "path_to_user_defined_parameter_mapping_file.txt");
 
-                // Tab 3
-                ifcOptions.AddOption("ExportPartsAsBuildingElements", "true");
+                // Tab 4
 
-                ifcOptions.AddOption("UseActiveViewGeometry", "false");
-
-                ifcOptions.AddOption("VisibleElementsOfCurrentView", "false");
 
                 // Tab 5
+                ifcOptions.AddOption("ExportPartsAsBuildingElements", "true");
+                ifcOptions.AddOption("AllowMixedSolidModelRepresentation", "true");
+                ifcOptions.AddOption("UseActiveViewGeometry", "false");
+                ifcOptions.AddOption("UseActiveViewGeometry", "false");
+                ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "true"); // Use family and type name for reference
+                ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "true"); // Use 2D room boundaries for room volume
+                ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "true"); // Include IFC site elevation in the site local placement origin
+                ifcOptions.AddOption("StoreIFCGUIDInElementParameterAfterExport", "true"); // Store the IFC GUID in an element parameter after export
+                ifcOptions.AddOption("ExportBoundingBox", "true");
+                ifcOptions.AddOption("Keep Tessellated Geometry As Triangulation", "true");
+                ifcOptions.AddOption("UseTypeNameOnlyForIfcTypeName", "true"); // Use type name only for IfcType name
+                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true"); // Use visible Revit name as the IfcEntity name
+
+
 
                 ifcOptions.AddOption("UseCoarseTessellation", "false");
                 ifcOptions.AddOption("ExportAnnotations", "true");
