@@ -270,6 +270,7 @@ namespace ClassLibrary2
                 string ifcFileName = Path.GetFileNameWithoutExtension(filePath) + ".ifc";
                 string ifcFilePath = Path.Combine(ifcFolderPath, ifcFileName);
 
+                // Tab 1
                 IFCExportOptions ifcOptions = new IFCExportOptions
                 {
                     FileVersion = IFCVersion.IFC2x3CV2,
@@ -277,10 +278,19 @@ namespace ClassLibrary2
                     SpaceBoundaryLevel = 2 // Level of space boundaries
                 };
 
+                // Set exchange requirements
+                ifcOptions.AddOption("ExchangeRequirement", "IFC4_Reference_View"); // Example exchange requirement
+
+                // Set file type
+                ifcOptions.AddOption("FileType", "IFC2x3"); // Example file type setting
+
                 // Set the phase to export
                 PhaseArray phases = doc.Phases;
                 Phase phaseToExport = phases.get_Item(phases.Size - 1); // Export the last phase
                 ifcOptions.AddOption("ExportingPhase", phaseToExport.Id.IntegerValue.ToString());
+
+                // Space boundaries
+                ifcOptions.AddOption("SpaceBoundaries", "2"); // Example setting for space boundaries
 
                 // Additional IFC export options
                 ifcOptions.AddOption("SplitWallsAndColumnsByLevel", "true");
@@ -314,8 +324,7 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("UseTypeNameOnlyForIfcTypeName", "true"); // Use type name only for IfcType name
                 ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true"); // Use visible Revit name as the IfcEntity name
 
-
-
+                // Extra
                 ifcOptions.AddOption("UseCoarseTessellation", "false");
                 ifcOptions.AddOption("ExportAnnotations", "true");
                 ifcOptions.AddOption("ExportSpecificSchedules", "true");
