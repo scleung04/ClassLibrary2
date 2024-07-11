@@ -1,6 +1,6 @@
 ﻿using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
-using Autodesk.Revit.DB.Events;
+using Autodesk.Revit.DB.Electrical;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
@@ -29,27 +29,19 @@ namespace ClassLibrary2
                 // Open the log file
                 using (StreamWriter writer = new StreamWriter(logFilePath, true))
                 {
-                    // Get all files in the folder
-                    string[] files = Directory.GetFiles(folderPath, "*.rvt");
+                    // Get all Revit files in the folder and subfolders
+                    string[] files = Directory.GetFiles(folderPath, "*.rvt", SearchOption.AllDirectories);
 
                     foreach (string filePath in files)
                     {
                         Document doc = null;
+                        bool saveChanges = false;
 
                         try
                         {
-                            // Open the Revit file with failure handling options to suppress warnings
+                            // Open the Revit file
                             ModelPath modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath);
                             OpenOptions openOptions = new OpenOptions();
-
-                            // Set up the Failure Handling Options to ignore warnings
-                            FailureHandlingOptions failureHandlingOptions = new FailureHandlingOptions();
-                            failureHandlingOptions.SetClearAfterRollback(true);
-                            failureHandlingOptions.SetFailuresPreprocessor(new WarningSuppressor());
-
-                            // Register a failure processor before opening the document
-                            FailureProcessor processor = new FailureProcessor(app, failureHandlingOptions);
-
                             doc = app.OpenDocumentFile(modelPath, openOptions);
 
                             // If the document was successfully opened
@@ -58,13 +50,41 @@ namespace ClassLibrary2
                                 // Write success message to log file
                                 writer.WriteLine(DateTime.Now.ToString() + ": Successfully opened Revit file: " + filePath);
 
+                                // Perform any necessary processing here
                                 // Check for the panel-circuit mismatch
                                 bool mismatchFound = CheckPanelCircuitMismatch(doc, writer);
 
                                 if (mismatchFound)
                                 {
-                                    writer.WriteLine(DateTime.Now.ToString() + ": Panel-circuit mismatch found. Skipping file: " + filePath);
-                                    continue; // Skip the file if mismatch is found
+                                    // Disconnect the panel automatically and log the action
+                                    using (Transaction trans = new Transaction(doc, "Disconnect Panel from Circuit"))
+                                    {
+                                        trans.Start();
+                                        try
+                                        {
+                                            DisconnectPanelFromCircuit(doc, writer);
+                                            saveChanges = true;
+                                            writer.WriteLine(DateTime.Now.ToString() + ": Disconnected panel from circuit for file: " + filePath);
+                                            trans.Commit();
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            trans.RollBack();
+                                            writer.WriteLine(DateTime.Now.ToString() + ": An error occurred during the transaction for file " + filePath + ": " + ex.Message);
+                                            writer.WriteLine(ex.StackTrace);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // If no mismatch was found, mark saveChanges to true
+                                    saveChanges = true;
+                                }
+
+                                if (saveChanges)
+                                {
+                                    // Save the document outside of any active transaction
+                                    SaveDocument(doc, writer);
                                 }
 
                                 // Export to IFC using Autodesk.IFC.Export.UI
@@ -80,13 +100,34 @@ namespace ClassLibrary2
                             // Write detailed error message to log file
                             writer.WriteLine(DateTime.Now.ToString() + ": An error occurred with file " + filePath + ": " + ex.Message);
                             writer.WriteLine(ex.StackTrace);
+
+                            // Automatically handle the error by disconnecting the panel
+                            if (doc != null)
+                            {
+                                try
+                                {
+                                    using (Transaction trans = new Transaction(doc, "Disconnect Panel from Circuit on Error"))
+                                    {
+                                        trans.Start();
+                                        DisconnectPanelFromCircuit(doc, writer);
+                                        saveChanges = true;
+                                        writer.WriteLine(DateTime.Now.ToString() + ": Automatically disconnected panel from circuit for file: " + filePath);
+                                        trans.Commit();
+                                    }
+                                }
+                                catch (Exception innerEx)
+                                {
+                                    writer.WriteLine(DateTime.Now.ToString() + ": An additional error occurred while trying to disconnect the panel for file " + filePath + ": " + innerEx.Message);
+                                    writer.WriteLine(innerEx.StackTrace);
+                                }
+                            }
                         }
                         finally
                         {
                             // Ensure the document is closed if it was opened
                             if (doc != null && doc.IsValidObject)
                             {
-                                doc.Close(false); // Close without saving changes
+                                doc.Close(false); // Close without saving changes again
                             }
                         }
                     }
@@ -116,6 +157,20 @@ namespace ClassLibrary2
             writer.WriteLine($"{DateTime.Now}: Failed to open Revit file: {filePath}");
         }
 
+        private void SaveDocument(Document doc, StreamWriter writer)
+        {
+            try
+            {
+                doc.Save();
+                writer.WriteLine($"{DateTime.Now}: Document saved successfully.");
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"{DateTime.Now}: An error occurred while saving the document: {ex.Message}");
+                writer.WriteLine(ex.StackTrace);
+            }
+        }
+
         private bool CheckPanelCircuitMismatch(Document doc, StreamWriter writer)
         {
             bool mismatchFound = false;
@@ -140,6 +195,69 @@ namespace ClassLibrary2
             }
 
             return mismatchFound;
+        }
+
+        private void DisconnectPanelFromCircuit(Document doc, StreamWriter writer)
+        {
+            var panels = new FilteredElementCollector(doc)
+                         .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
+                         .OfClass(typeof(FamilyInstance))
+                         .WhereElementIsNotElementType()
+                         .OfType<FamilyInstance>()
+                         .ToList();
+
+            foreach (var panel in panels)
+            {
+                var electricalSystems = panel.MEPModel?.GetElectricalSystems();
+                if (electricalSystems != null)
+                {
+                    foreach (var electricalSystem in electricalSystems)
+                    {
+                        using (var trans = new Transaction(doc, "Disconnect Panel from Circuit"))
+                        {
+                            trans.Start();
+                            foreach (var connector in electricalSystem.ConnectorManager.Connectors.OfType<Connector>())
+                            {
+                                foreach (var connectedConnector in connector.AllRefs.OfType<Connector>())
+                                {
+                                    connector.DisconnectFrom(connectedConnector);
+                                    writer.WriteLine($"{DateTime.Now}: Disconnected connector {connector.Owner.Id} from {connectedConnector.Owner.Id}");
+                                }
+                            }
+                            if (ShouldDeleteElement(electricalSystem))
+                            {
+                                doc.Delete(electricalSystem.Id);
+                                writer.WriteLine($"{DateTime.Now}: Deleted electrical system: {electricalSystem.Id.IntegerValue}");
+                            }
+                            trans.Commit();
+                        }
+                    }
+                }
+            }
+        }
+
+        private bool ShouldDeleteElement(Element element)
+        {
+            if (element is ElectricalSystem electricalSystem)
+            {
+                List<Connector> loadConnectors = new List<Connector>();
+
+                foreach (Element e in electricalSystem.Elements)
+                {
+                    if (e is FamilyInstance familyInstance && familyInstance.MEPModel != null)
+                    {
+                        var connectors = familyInstance.MEPModel.ConnectorManager.Connectors
+                            .OfType<Connector>()
+                            .Where(c => c.IsConnected);
+
+                        loadConnectors.AddRange(connectors);
+                    }
+                }
+
+                return !loadConnectors.Any();
+            }
+
+            return false;
         }
 
         private void ExportToIFC(Document doc, string filePath, StreamWriter writer)
@@ -178,6 +296,7 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("SplitWallsAndColumnsByLevel", "false");
 
                 // Tab 2: Additional Content
+                ifcOptions.AddOption("ExportLinkedFiles", "true");
                 ifcOptions.AddOption("ExportElementsVisibleInView", "false"); // Export only elements visible in the view
                 ifcOptions.AddOption("ExportRooms", "false"); // Export rooms
                 ifcOptions.AddOption("ExportAreas", "false"); // Export areas
@@ -188,7 +307,7 @@ namespace ClassLibrary2
                 // Tab 3: Property Sets
                 ifcOptions.AddOption("ExportRevitPropertySets", "false");
                 ifcOptions.AddOption("ExportIFCCommonPropertySets", "true");
-                ifcOptions.AddOption("ExportBaseQuantities", "false");
+                ifcOptions.ExportBaseQuantities = false;
                 ifcOptions.AddOption("ExportMaterialPropertySets", "false"); // Export material property sets
                 ifcOptions.AddOption("ExportSchedulesAsPsets", "false");
                 ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false"); // Export only schedules containing IFC, Pset, or Common in the title
@@ -198,6 +317,7 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("ExportUserDefinedParameterMappingFile", "path_to_user_defined_parameter_mapping_file.txt");
 
                 // Tab 4: Level of Detail
+                ifcOptions.AddOption("TessellationLevelOfDetail", "Medium");
 
                 // Tab 5: Advanced
                 ifcOptions.AddOption("ExportPartsAsBuildingElements", "false");
@@ -211,58 +331,27 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("ExportBoundingBox", "false");
                 ifcOptions.AddOption("Keep Tessellated Geometry As Triangulation", "false");
                 ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false"); // Use type name only for IFC type
-                ifcOptions.AddOption("AddLinkingDataForFM", "false");
+                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true"); // Use visible Revit name as IfcEntity name
 
-                // Export to IFC
-                doc.Export(ifcFolderPath, ifcFileName, ifcOptions);
+                // Tab 6: Geographic Reference
+                ifcOptions.AddOption("SitePlacement", "DefaultSite"); // Use Default Site for site placement
+                ifcOptions.AddOption("CoordinateBase", "SharedCoordinates"); // Use Shared Coordinates for coordinate base
 
-                writer.WriteLine(DateTime.Now.ToString() + ": Successfully exported to IFC: " + ifcFilePath);
+                using (Transaction exportTrans = new Transaction(doc, "Export IFC"))
+                {
+                    exportTrans.Start();
+                    doc.Export(ifcFolderPath, ifcFileName, ifcOptions);
+                    exportTrans.Commit();
+                }
+
+                writer.WriteLine($"{DateTime.Now}: IFC export completed for: {ifcFilePath}");
             }
             catch (Exception ex)
             {
-                writer.WriteLine(DateTime.Now.ToString() + ": An error occurred during IFC export for file " + filePath + ": " + ex.Message);
+                writer.WriteLine($"{DateTime.Now}: An error occurred during IFC export for file {filePath}: {ex.Message}");
                 writer.WriteLine(ex.StackTrace);
-            }
-        }
-
-        // Class to suppress warnings
-        private class WarningSuppressor : IFailuresPreprocessor
-        {
-            public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor)
-            {
-                foreach (FailureMessageAccessor failure in failuresAccessor.GetFailureMessages())
-                {
-                    if (failure.GetSeverity() == FailureSeverity.Warning)
-                    {
-                        failuresAccessor.DeleteWarning(failure);
-                    }
-                }
-                return FailureProcessingResult.Continue;
-            }
-        }
-
-        // Class to handle failure processing
-        private class FailureProcessor
-        {
-            private Application _app;
-            private FailureHandlingOptions _options;
-
-            public FailureProcessor(Application app, FailureHandlingOptions options)
-            {
-                _app = app;
-                _options = options;
-                _app.FailuresProcessing += OnFailuresProcessing;
-            }
-
-            private void OnFailuresProcessing(object sender, FailuresProcessingEventArgs e)
-            {
-                e.SetProcessingOptions(_options);
-            }
-
-            ~FailureProcessor()
-            {
-                _app.FailuresProcessing -= OnFailuresProcessing;
             }
         }
     }
 }
+
