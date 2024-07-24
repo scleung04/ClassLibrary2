@@ -29,8 +29,8 @@ namespace ClassLibrary2
                 // Open the log file
                 using (StreamWriter writer = new StreamWriter(logFilePath, true))
                 {
-                    // Get all Revit files in the folder and subfolders
-                    string[] files = Directory.GetFiles(folderPath, "*.rvt", SearchOption.AllDirectories);
+                    // Get all files in the folder
+                    string[] files = Directory.GetFiles(folderPath, "*.rvt");
 
                     foreach (string filePath in files)
                     {
@@ -312,12 +312,12 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("ExportSchedulesAsPsets", "false");
                 ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false"); // Export only schedules containing IFC, Pset, or Common in the title
                 ifcOptions.AddOption("ExportUserDefinedPsets", "false");
-                ifcOptions.AddOption("ExportUserDefinedPsetsFile", "path_to_user_defined_psets_file.json");
+                ifcOptions.AddOption("ExportUserDefinedPsetsFile", "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\JoaquinDefinedPropertySet.txt");
                 ifcOptions.AddOption("ExportParameterMappingTable", "false"); // Export parameter mapping table
                 ifcOptions.AddOption("ExportUserDefinedParameterMappingFile", "path_to_user_defined_parameter_mapping_file.txt");
 
                 // Tab 4: Level of Detail
-                ifcOptions.AddOption("TessellationLevelOfDetail", "Medium");
+                // ifcOptions.AddOption("TessellationLevelOfDetail", "Medium"); \\ Something is wrong with this option which causes the ifc export to not occur
 
                 // Tab 5: Advanced
                 ifcOptions.AddOption("ExportPartsAsBuildingElements", "false");
@@ -331,7 +331,7 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("ExportBoundingBox", "false");
                 ifcOptions.AddOption("Keep Tessellated Geometry As Triangulation", "false");
                 ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false"); // Use type name only for IFC type
-                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true"); // Use visible Revit name as IfcEntity name
+                ifcOptions.AddOption("UseVisibleRevitNa8meAsIfcEntityName", "true"); // Use visible Revit name as IfcEntity name
 
                 // Tab 6: Geographic Reference
                 ifcOptions.AddOption("SitePlacement", "DefaultSite"); // Use Default Site for site placement
@@ -352,6 +352,6 @@ namespace ClassLibrary2
                 writer.WriteLine(ex.StackTrace);
             }
         }
+
     }
 }
-
