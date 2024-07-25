@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autodesk.Revit.ApplicationServices;
+using System.Windows.Forms;
 
 namespace ClassLibrary2
 {
@@ -15,21 +16,22 @@ namespace ClassLibrary2
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            // Path to the folder containing Revit files
-            string folderPath = "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\Revit Files";
-            // Path to the log file
-            string logFilePath = "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\Dynamo_Revit_Log.txt";
+            string folderPath = SelectFolder();
+            if (string.IsNullOrEmpty(folderPath))
+            {
+                message = "No folder selected.";
+                return Result.Failed;
+            }
+
+            string logFilePath = Path.Combine(folderPath, "Dynamo_Revit_Log.txt");
 
             try
             {
-                // Get the current Revit application
                 UIApplication uiApp = commandData.Application;
-                Application app = uiApp.Application;
+                Autodesk.Revit.ApplicationServices.Application app = uiApp.Application;
 
-                // Open the log file
                 using (StreamWriter writer = new StreamWriter(logFilePath, true))
                 {
-                    // Get all files in the folder
                     string[] files = Directory.GetFiles(folderPath, "*.rvt");
 
                     foreach (string filePath in files)
@@ -39,24 +41,18 @@ namespace ClassLibrary2
 
                         try
                         {
-                            // Open the Revit file
                             ModelPath modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath);
                             OpenOptions openOptions = new OpenOptions();
                             doc = app.OpenDocumentFile(modelPath, openOptions);
 
-                            // If the document was successfully opened
                             if (doc != null)
                             {
-                                // Write success message to log file
                                 writer.WriteLine(DateTime.Now.ToString() + ": Successfully opened Revit file: " + filePath);
 
-                                // Perform any necessary processing here
-                                // Check for the panel-circuit mismatch
                                 bool mismatchFound = CheckPanelCircuitMismatch(doc, writer);
 
                                 if (mismatchFound)
                                 {
-                                    // Disconnect the panel automatically and log the action
                                     using (Transaction trans = new Transaction(doc, "Disconnect Panel from Circuit"))
                                     {
                                         trans.Start();
@@ -77,17 +73,14 @@ namespace ClassLibrary2
                                 }
                                 else
                                 {
-                                    // If no mismatch was found, mark saveChanges to true
                                     saveChanges = true;
                                 }
 
                                 if (saveChanges)
                                 {
-                                    // Save the document outside of any active transaction
                                     SaveDocument(doc, writer);
                                 }
 
-                                // Export to IFC using Autodesk.IFC.Export.UI
                                 ExportToIFC(doc, filePath, writer);
                             }
                             else
@@ -97,11 +90,9 @@ namespace ClassLibrary2
                         }
                         catch (Exception ex)
                         {
-                            // Write detailed error message to log file
                             writer.WriteLine(DateTime.Now.ToString() + ": An error occurred with file " + filePath + ": " + ex.Message);
                             writer.WriteLine(ex.StackTrace);
 
-                            // Automatically handle the error by disconnecting the panel
                             if (doc != null)
                             {
                                 try
@@ -124,10 +115,9 @@ namespace ClassLibrary2
                         }
                         finally
                         {
-                            // Ensure the document is closed if it was opened
                             if (doc != null && doc.IsValidObject)
                             {
-                                doc.Close(false); // Close without saving changes again
+                                doc.Close(false);
                             }
                         }
                     }
@@ -135,7 +125,6 @@ namespace ClassLibrary2
             }
             catch (OperationCanceledException)
             {
-                // Log the operation cancellation
                 using (StreamWriter writer = new StreamWriter(logFilePath, true))
                 {
                     writer.WriteLine(DateTime.Now.ToString() + ": The operation was cancelled by the user.");
@@ -150,6 +139,19 @@ namespace ClassLibrary2
             }
 
             return Result.Succeeded;
+        }
+
+        private string SelectFolder()
+        {
+            using (FolderBrowserDialog folderDialog = new FolderBrowserDialog())
+            {
+                DialogResult result = folderDialog.ShowDialog();
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
+                {
+                    return folderDialog.SelectedPath;
+                }
+            }
+            return string.Empty;
         }
 
         private void HandleFileOpeningError(string filePath, StreamWriter writer)
@@ -264,78 +266,53 @@ namespace ClassLibrary2
         {
             try
             {
-                string ifcFolderPath = "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\R2024";
+                string ifcFolderPath = Path.Combine(Path.GetDirectoryName(filePath), "IFC_Exports");
                 Directory.CreateDirectory(ifcFolderPath);
 
                 string ifcFileName = Path.GetFileNameWithoutExtension(filePath) + ".ifc";
                 string ifcFilePath = Path.Combine(ifcFolderPath, ifcFileName);
 
-                // Set up IFC export options
                 IFCExportOptions ifcOptions = new IFCExportOptions
                 {
                     FileVersion = IFCVersion.IFC2x3CV2,
                     ExportBaseQuantities = true,
-                    SpaceBoundaryLevel = 2 // Level of space boundaries
+                    SpaceBoundaryLevel = 2
                 };
 
-                // Set exchange requirements
-                ifcOptions.AddOption("ExchangeRequirement", "IFC4_Reference_View"); // Example exchange requirement
+                ifcOptions.AddOption("ExchangeRequirement", "IFC4_Reference_View");
+                ifcOptions.AddOption("FileType", "IFC2x3");
 
-                // Set file type
-                ifcOptions.AddOption("FileType", "IFC2x3"); // Example file type setting
-
-                // Set the phase to export
                 PhaseArray phases = doc.Phases;
-                Phase phaseToExport = phases.get_Item(phases.Size - 1); // Export the last phase
+                Phase phaseToExport = phases.get_Item(phases.Size - 1);
                 ifcOptions.AddOption("ExportingPhase", phaseToExport.Id.IntegerValue.ToString());
+                ifcOptions.AddOption("AdditionalProximityControl", "true");
 
-                // Space boundaries
-                ifcOptions.AddOption("SpaceBoundaries", "none"); // Example setting for space boundaries
-
-                // Additional IFC export options
-                ifcOptions.AddOption("SplitWallsAndColumnsByLevel", "false");
-
-                // Tab 2: Additional Content
-                ifcOptions.AddOption("ExportLinkedFiles", "true");
-                ifcOptions.AddOption("ExportElementsVisibleInView", "false"); // Export only elements visible in the view
-                ifcOptions.AddOption("ExportRooms", "false"); // Export rooms
-                ifcOptions.AddOption("ExportAreas", "false"); // Export areas
-                ifcOptions.AddOption("ExportSpaces", "false"); // Export spaces in 3D views
-                ifcOptions.AddOption("ExportSteelElements", "true"); // Include steel elements
-                ifcOptions.AddOption("Export2DPlanViewElements", "false"); // Export 2D plan view elements
-
-                // Tab 3: Property Sets
+                ifcOptions.AddOption("ExportLinkedFiles", "false");
                 ifcOptions.AddOption("ExportRevitPropertySets", "false");
                 ifcOptions.AddOption("ExportIFCCommonPropertySets", "true");
                 ifcOptions.ExportBaseQuantities = false;
-                ifcOptions.AddOption("ExportMaterialPropertySets", "false"); // Export material property sets
+                ifcOptions.AddOption("ExportMaterialPropertySets", "false");
                 ifcOptions.AddOption("ExportSchedulesAsPsets", "false");
-                ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false"); // Export only schedules containing IFC, Pset, or Common in the title
+                ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false");
                 ifcOptions.AddOption("ExportUserDefinedPsets", "false");
                 ifcOptions.AddOption("ExportUserDefinedPsetsFile", "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\JoaquinDefinedPropertySet.txt");
-                ifcOptions.AddOption("ExportParameterMappingTable", "false"); // Export parameter mapping table
+                ifcOptions.AddOption("ExportParameterMappingTable", "false");
                 ifcOptions.AddOption("ExportUserDefinedParameterMappingFile", "path_to_user_defined_parameter_mapping_file.txt");
 
-                // Tab 4: Level of Detail
-                // ifcOptions.AddOption("TessellationLevelOfDetail", "Medium"); \\ Something is wrong with this option which causes the ifc export to not occur
-
-                // Tab 5: Advanced
                 ifcOptions.AddOption("ExportPartsAsBuildingElements", "false");
                 ifcOptions.AddOption("AllowMixedSolidModelRepresentation", "false");
                 ifcOptions.AddOption("UseActiveViewGeometry", "false");
-                ifcOptions.AddOption("UseActiveViewGeometry", "false");
-                ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "false"); // Use family and type name for reference
-                ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "false"); // Use 2D room boundaries for room volume
-                ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "false"); // Include IFC site elevation in the site local placement origin
-                ifcOptions.AddOption("StoreIFCGUIDInElementParameterAfterExport", "true"); // Store the IFC GUID in an element parameter after export
+                ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "false");
+                ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "false");
+                ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "false");
+                ifcOptions.AddOption("StoreIFCGUIDInElementParameterAfterExport", "true");
                 ifcOptions.AddOption("ExportBoundingBox", "false");
-                ifcOptions.AddOption("Keep Tessellated Geometry As Triangulation", "false");
-                ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false"); // Use type name only for IFC type
-                ifcOptions.AddOption("UseVisibleRevitNa8meAsIfcEntityName", "true"); // Use visible Revit name as IfcEntity name
+                ifcOptions.AddOption("KeepTessellatedGeometryAsTriangulation", "false");
+                ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false");
+                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true");
 
-                // Tab 6: Geographic Reference
-                ifcOptions.AddOption("SitePlacement", "DefaultSite"); // Use Default Site for site placement
-                ifcOptions.AddOption("CoordinateBase", "SharedCoordinates"); // Use Shared Coordinates for coordinate base
+                ifcOptions.AddOption("SitePlacement", "DefaultSite");
+                ifcOptions.AddOption("CoordinateBase", "SharedCoordinates");
 
                 using (Transaction exportTrans = new Transaction(doc, "Export IFC"))
                 {
@@ -352,6 +329,5 @@ namespace ClassLibrary2
                 writer.WriteLine(ex.StackTrace);
             }
         }
-
     }
 }
