@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Autodesk.Revit.ApplicationServices;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace ClassLibrary2
@@ -16,6 +16,23 @@ namespace ClassLibrary2
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken cancellationToken = cancellationTokenSource.Token;
+
+            Thread monitorThread = new Thread(() =>
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.Escape)
+                    {
+                        cancellationTokenSource.Cancel();
+                    }
+                    Thread.Sleep(100); // Check every 100ms for key press
+                }
+            });
+
+            monitorThread.Start();
+
             string folderPath = SelectFolder();
             if (string.IsNullOrEmpty(folderPath))
             {
@@ -36,6 +53,12 @@ namespace ClassLibrary2
 
                     foreach (string filePath in files)
                     {
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            writer.WriteLine(DateTime.Now.ToString() + ": Operation was aborted by user.");
+                            break;
+                        }
+
                         Document doc = null;
                         bool saveChanges = false;
 
@@ -81,7 +104,7 @@ namespace ClassLibrary2
                                     SaveDocument(doc, writer);
                                 }
 
-                                ExportToIFC(doc, filePath, writer);
+                                ExportToIFC(doc, filePath, writer, cancellationToken);
                             }
                             else
                             {
@@ -136,6 +159,11 @@ namespace ClassLibrary2
                 {
                     writer.WriteLine(DateTime.Now.ToString() + ": An error occurred: " + ex.Message);
                 }
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+                monitorThread.Join();
             }
 
             return Result.Succeeded;
@@ -205,12 +233,12 @@ namespace ClassLibrary2
                          .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                          .OfClass(typeof(FamilyInstance))
                          .WhereElementIsNotElementType()
-                         .OfType<FamilyInstance>()
                          .ToList();
 
             foreach (var panel in panels)
             {
-                var electricalSystems = panel.MEPModel?.GetElectricalSystems();
+                var familyInstance = panel as FamilyInstance;
+                var electricalSystems = familyInstance?.MEPModel?.GetElectricalSystems();
                 if (electricalSystems != null)
                 {
                     foreach (var electricalSystem in electricalSystems)
@@ -238,6 +266,7 @@ namespace ClassLibrary2
             }
         }
 
+
         private bool ShouldDeleteElement(Element element)
         {
             if (element is ElectricalSystem electricalSystem)
@@ -262,7 +291,7 @@ namespace ClassLibrary2
             return false;
         }
 
-        private void ExportToIFC(Document doc, string filePath, StreamWriter writer)
+        private void ExportToIFC(Document doc, string filePath, StreamWriter writer, CancellationToken cancellationToken)
         {
             try
             {
@@ -272,47 +301,72 @@ namespace ClassLibrary2
                 string ifcFileName = Path.GetFileNameWithoutExtension(filePath) + ".ifc";
                 string ifcFilePath = Path.Combine(ifcFolderPath, ifcFileName);
 
+                // Set up IFC export options
                 IFCExportOptions ifcOptions = new IFCExportOptions
                 {
                     FileVersion = IFCVersion.IFC2x3CV2,
                     ExportBaseQuantities = true,
-                    SpaceBoundaryLevel = 2
+                    SpaceBoundaryLevel = 2 // Level of space boundaries
                 };
 
-                ifcOptions.AddOption("ExchangeRequirement", "IFC4_Reference_View");
-                ifcOptions.AddOption("FileType", "IFC2x3");
+                // Set exchange requirements
+                // ifcOptions.AddOption("ExchangeRequirement", "IFC4_Reference_View"); // Example exchange requirement
 
+                // Set file type
+                ifcOptions.AddOption("FileType", "IFC2x3"); // Example file type setting
+
+                // Set the phase to export
                 PhaseArray phases = doc.Phases;
-                Phase phaseToExport = phases.get_Item(phases.Size - 1);
+                Phase phaseToExport = phases.get_Item(phases.Size - 1); // Export the last phase
                 ifcOptions.AddOption("ExportingPhase", phaseToExport.Id.IntegerValue.ToString());
-                ifcOptions.AddOption("AdditionalProximityControl", "true");
 
-                ifcOptions.AddOption("ExportLinkedFiles", "false");
+                // Space boundaries
+                ifcOptions.AddOption("SpaceBoundaries", "none"); // Example setting for space boundaries
+
+                // Additional IFC export options
+                ifcOptions.AddOption("SplitWallsAndColumnsByLevel", "false");
+
+                // Tab 2: Additional Content
+                ifcOptions.AddOption("ExportLinkedFiles", "true");
+                ifcOptions.AddOption("ExportElementsVisibleInView", "false"); // Export only elements visible in the view
+                ifcOptions.AddOption("ExportRooms", "false"); // Export rooms
+                ifcOptions.AddOption("ExportAreas", "false"); // Export areas
+                ifcOptions.AddOption("ExportSpaces", "false"); // Export spaces in 3D views
+                ifcOptions.AddOption("ExportSteelElements", "true"); // Include steel elements
+                ifcOptions.AddOption("Export2DPlanViewElements", "false"); // Export 2D plan view elements
+
+                // Tab 3: Property Sets
                 ifcOptions.AddOption("ExportRevitPropertySets", "false");
                 ifcOptions.AddOption("ExportIFCCommonPropertySets", "true");
                 ifcOptions.ExportBaseQuantities = false;
-                ifcOptions.AddOption("ExportMaterialPropertySets", "false");
+                ifcOptions.AddOption("ExportMaterialPropertySets", "false"); // Export material property sets
                 ifcOptions.AddOption("ExportSchedulesAsPsets", "false");
-                ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false");
+                ifcOptions.AddOption("ExportOnlySchedulesContainingIFCPsetOrCommonInTitle", "false"); // Export only schedules containing IFC, Pset, or Common in the title
                 ifcOptions.AddOption("ExportUserDefinedPsets", "false");
                 ifcOptions.AddOption("ExportUserDefinedPsetsFile", "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\JoaquinDefinedPropertySet.txt");
-                ifcOptions.AddOption("ExportParameterMappingTable", "false");
+                ifcOptions.AddOption("ExportParameterMappingTable", "false"); // Export parameter mapping table
                 ifcOptions.AddOption("ExportUserDefinedParameterMappingFile", "path_to_user_defined_parameter_mapping_file.txt");
 
+                // Tab 4: Level of Detail
+                // ifcOptions.AddOption("TessellationLevelOfDetail", "Medium");
+
+                // Tab 5: Advanced
                 ifcOptions.AddOption("ExportPartsAsBuildingElements", "false");
                 ifcOptions.AddOption("AllowMixedSolidModelRepresentation", "false");
                 ifcOptions.AddOption("UseActiveViewGeometry", "false");
-                ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "false");
-                ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "false");
-                ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "false");
-                ifcOptions.AddOption("StoreIFCGUIDInElementParameterAfterExport", "true");
+                ifcOptions.AddOption("UseActiveViewGeometry", "false");
+                ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "false"); // Use family and type name for reference
+                ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "false"); // Use 2D room boundaries for room volume
+                ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "false"); // Include IFC site elevation in the site local placement origin
+                ifcOptions.AddOption("StoreIFCGUIDInElementParameterAfterExport", "true"); // Store the IFC GUID in an element parameter after export
                 ifcOptions.AddOption("ExportBoundingBox", "false");
-                ifcOptions.AddOption("KeepTessellatedGeometryAsTriangulation", "false");
-                ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false");
-                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true");
+                ifcOptions.AddOption("Keep Tessellated Geometry As Triangulation", "false");
+                ifcOptions.AddOption("UseTypeNameOnlyForIfcType", "false"); // Use type name only for IFC type
+                ifcOptions.AddOption("UseVisibleRevitNameAsIfcEntityName", "true"); // Use visible Revit name as IfcEntity name
 
-                ifcOptions.AddOption("SitePlacement", "DefaultSite");
-                ifcOptions.AddOption("CoordinateBase", "SharedCoordinates");
+                // Tab 6: Geographic Reference
+                ifcOptions.AddOption("SitePlacement", "DefaultSite"); // Use Default Site for site placement
+                ifcOptions.AddOption("CoordinateBase", "SharedCoordinates"); // Use Shared Coordinates for coordinate base
 
                 using (Transaction exportTrans = new Transaction(doc, "Export IFC"))
                 {
