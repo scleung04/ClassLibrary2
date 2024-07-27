@@ -16,23 +16,6 @@ namespace ClassLibrary2
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
-            CancellationToken cancellationToken = cancellationTokenSource.Token;
-
-            Thread monitorThread = new Thread(() =>
-            {
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    if (Console.KeyAvailable && Console.ReadKey(true).Key == ConsoleKey.Escape)
-                    {
-                        cancellationTokenSource.Cancel();
-                    }
-                    Thread.Sleep(100); // Check every 100ms for key press
-                }
-            });
-
-            monitorThread.Start();
-
             string folderPath = SelectFolder();
             if (string.IsNullOrEmpty(folderPath))
             {
@@ -40,7 +23,14 @@ namespace ClassLibrary2
                 return Result.Failed;
             }
 
-            string logFilePath = Path.Combine(folderPath, "Dynamo_Revit_Log.txt");
+            string logFilePath = "C:\\Users\\scleu\\Downloads\\2024 Summer Research\\Dynamo_Revit_Log.txt";
+
+            string ifcExportPath = SelectIFCExportFolder();
+            if (string.IsNullOrEmpty(ifcExportPath))
+            {
+                message = "No folder selected for IFC export.";
+                return Result.Failed;
+            }
 
             try
             {
@@ -53,12 +43,6 @@ namespace ClassLibrary2
 
                     foreach (string filePath in files)
                     {
-                        if (cancellationToken.IsCancellationRequested)
-                        {
-                            writer.WriteLine(DateTime.Now.ToString() + ": Operation was aborted by user.");
-                            break;
-                        }
-
                         Document doc = null;
                         bool saveChanges = false;
 
@@ -104,7 +88,7 @@ namespace ClassLibrary2
                                     SaveDocument(doc, writer);
                                 }
 
-                                ExportToIFC(doc, filePath, writer, cancellationToken);
+                                ExportToIFC(doc, filePath, writer, ifcExportPath);
                             }
                             else
                             {
@@ -146,24 +130,12 @@ namespace ClassLibrary2
                     }
                 }
             }
-            catch (OperationCanceledException)
-            {
-                using (StreamWriter writer = new StreamWriter(logFilePath, true))
-                {
-                    writer.WriteLine(DateTime.Now.ToString() + ": The operation was cancelled by the user.");
-                }
-            }
             catch (Exception ex)
             {
                 using (StreamWriter writer = new StreamWriter(logFilePath, true))
                 {
                     writer.WriteLine(DateTime.Now.ToString() + ": An error occurred: " + ex.Message);
                 }
-            }
-            finally
-            {
-                cancellationTokenSource.Cancel();
-                monitorThread.Join();
             }
 
             return Result.Succeeded;
@@ -173,6 +145,20 @@ namespace ClassLibrary2
         {
             using (FolderBrowserDialog folderDialog = new FolderBrowserDialog())
             {
+                DialogResult result = folderDialog.ShowDialog();
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
+                {
+                    return folderDialog.SelectedPath;
+                }
+            }
+            return string.Empty;
+        }
+
+        private string SelectIFCExportFolder()
+        {
+            using (FolderBrowserDialog folderDialog = new FolderBrowserDialog())
+            {
+                folderDialog.Description = "Select Folder to Save IFC Exports";
                 DialogResult result = folderDialog.ShowDialog();
                 if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
                 {
@@ -266,7 +252,6 @@ namespace ClassLibrary2
             }
         }
 
-
         private bool ShouldDeleteElement(Element element)
         {
             if (element is ElectricalSystem electricalSystem)
@@ -291,15 +276,14 @@ namespace ClassLibrary2
             return false;
         }
 
-        private void ExportToIFC(Document doc, string filePath, StreamWriter writer, CancellationToken cancellationToken)
+        private void ExportToIFC(Document doc, string filePath, StreamWriter writer, string ifcExportPath)
         {
             try
             {
-                string ifcFolderPath = Path.Combine(Path.GetDirectoryName(filePath), "IFC_Exports");
-                Directory.CreateDirectory(ifcFolderPath);
+                Directory.CreateDirectory(ifcExportPath);
 
                 string ifcFileName = Path.GetFileNameWithoutExtension(filePath) + ".ifc";
-                string ifcFilePath = Path.Combine(ifcFolderPath, ifcFileName);
+                string ifcFilePath = Path.Combine(ifcExportPath, ifcFileName);
 
                 // Set up IFC export options
                 IFCExportOptions ifcOptions = new IFCExportOptions
@@ -354,7 +338,6 @@ namespace ClassLibrary2
                 ifcOptions.AddOption("ExportPartsAsBuildingElements", "false");
                 ifcOptions.AddOption("AllowMixedSolidModelRepresentation", "false");
                 ifcOptions.AddOption("UseActiveViewGeometry", "false");
-                ifcOptions.AddOption("UseActiveViewGeometry", "false");
                 ifcOptions.AddOption("UseFamilyAndTypeNameForReference", "false"); // Use family and type name for reference
                 ifcOptions.AddOption("Use2DRoomBoundariesForRoomVolume", "false"); // Use 2D room boundaries for room volume
                 ifcOptions.AddOption("IncludeIFCSiteElevationInTheSiteLocalPlacementOrigin", "false"); // Include IFC site elevation in the site local placement origin
@@ -371,7 +354,7 @@ namespace ClassLibrary2
                 using (Transaction exportTrans = new Transaction(doc, "Export IFC"))
                 {
                     exportTrans.Start();
-                    doc.Export(ifcFolderPath, ifcFileName, ifcOptions);
+                    doc.Export(ifcExportPath, ifcFileName, ifcOptions);
                     exportTrans.Commit();
                 }
 
